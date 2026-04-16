@@ -45,21 +45,36 @@ def main():
     
     
 
-    engine = SimulationEngine(
-        n_iterations=20, 
-        true_beta=WAHRER_EFFEKT, 
-        true_rho=0.8, 
-        random_state=99
-    )
+    N_LIST = [100, 200, 400, 800, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000]
+
+    DIST_CONFIGS = [
+        {'name': 'gamma', 'params': {'shape': 1.0, 'scale': 1.0}},      # Extrem schief
+        {'name': 'gamma', 'params': {'shape': 5.0, 'scale': 1.0}},      # Moderat schief
+        {'name': 'exponential', 'params': {'scale': 1.0}},             # Stark schief
+        {'name': 'beta', 'params': {'a': 0.5, 'b': 0.5}},             # U-förmig
+        {'name': 'f', 'params': {'dfnum': 5, 'dfden': 2}},             # Langer rechter Rand
+        {'name': 'chisquare', 'params': {'df': 1}},                    # Extrem spitz/schief
+        {'name': 'laplace', 'params': {'scale': 1.0}},                 # Symmetrisch, hohe Kurtosis
+        {'name': 'weibull', 'params': {'a': 0.5}},                     # Stark abfallend
+    ]
+
+    # 2. SimulationEngine mit mehr Iterationen für stabilere Ergebnisse
+    engine = SimulationEngine(n_iterations=100, true_beta=WAHRER_EFFEKT, random_state=99)
     
-    print("Starte Simulation über verschiedene N und Verteilungen...\n")
+    print(f"Starte Groß-Simulation über {len(N_LIST)} Stichprobengrößen und {len(DIST_CONFIGS)} Verteilungen...\n")
+    
     ergebnis_tabelle = engine.run(
-        sample_sizes=[250, 500, 1000], 
-        distributions=['gamma', 't']
+        sample_sizes=N_LIST, 
+        distribution_configs=DIST_CONFIGS
     )
     
+    # 3. Ergebnisse anzeigen und als CSV für die Auswertung speichern
     print("\n=== FINALE SIMULATIONSERGEBNISSE ===")
-    print(ergebnis_tabelle.to_string(index=False))
+    print(ergebnis_tabelle.head(20).to_string(index=False)) # Zeige die ersten 20 Zeilen
+    
+    # Speichere die Daten für deine Graphen/Plots
+    ergebnis_tabelle.to_csv("simulations_ergebnisse_gross.csv", index=False)
+    print("\nErgebnisse wurden in 'simulations_ergebnisse_gross.csv' gespeichert.")
     
 
 if __name__ == "__main__":

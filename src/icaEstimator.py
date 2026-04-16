@@ -61,11 +61,37 @@ class ICAEstimator:
             self.endog_vars = [v.strip() for v in right.split('+') if v.strip()]
             self.exog_vars = []
 
+    # führt Input-Validierungen analog zum R-Code durch
+    def _validate_inputs(self, df):
+        """Prüft die Eingabedaten auf fehlende, nicht-numerische oder konstante Variablen sowie den vollen Rang."""
+        all_vars = [self.dep_var] + self.endog_vars + self.exog_vars
+        
+        missing_vars = [v for v in all_vars if v not in df.columns]
+        if missing_vars:
+            raise ValueError(f"Folgende Variablen fehlen im Datensatz: {', '.join(missing_vars)}")
+            
+        non_numeric = [v for v in all_vars if not pd.api.types.is_numeric_dtype(df[v])]
+        if non_numeric:
+            raise ValueError(f"Folgende Variablen sind nicht numerisch: {', '.join(non_numeric)}")
+            
+        constant_vars = [v for v in all_vars if df[v].nunique() <= 1]
+        if constant_vars:
+            raise ValueError(f"Folgende Variablen sind konstant (keine Varianz): {', '.join(constant_vars)}")
+            
+        feature_cols = self.endog_vars + self.exog_vars
+        X_check = df[feature_cols].copy()
+        if self.has_intercept:
+            X_check = sm.add_constant(X_check, has_constant='add')
+            
+        if np.linalg.matrix_rank(X_check.values) < X_check.shape[1]:
+            raise ValueError("Die Designmatrix hat keinen vollen Spaltenrang (Rank Deficient).")
+
     # Hilfsmethode um die Residuen zu berechnen, wollen für ICA X auschleißen, ansonsten wird X auch zerlegt (wollen wir nicht)
     # Residuum von Y: Alles an Y, was NICHT durch X erklärt werden kann, für P genauso
-    def _get_residuals(self, y, X):
-
-        if self.has_intercept:
+    def _get_residuals(self, y, X, force_intercept=True):
+        # force_intercept=True stellt sicher, dass wie in R immer ein Intercept 
+        # bei der Residualisierung genutzt wird.
+        if force_intercept or self.has_intercept:
             X = sm.add_constant(X, has_constant='add')
         model = sm.OLS(y, X).fit()
         return model.resid
@@ -138,8 +164,8 @@ class ICAEstimator:
             
         final_model = sm.OLS(Y, X_final).fit()
         
-        # geschätzen parameter weder zurück gegeben
-        return final_model.params
+        # geschätzen parameter und control_func zurück geben
+        return final_model.params, control_func
 
 
     # Hauptaufruf der ICA Methode mit bootstrapping Unsere control_func stand nicht einfach so im originalen Datensatz. 
@@ -149,9 +175,12 @@ class ICAEstimator:
 
     def fit(self, df):
 
-        
+        # 0. Datensatz bereinigen (NAs entfernen) und Inputs validieren
+        df = df.dropna(subset=[self.dep_var] + self.endog_vars + self.exog_vars).copy()
+        self._validate_inputs(df)
+
         # Schätzung auf den Originaldaten (Point-Estimation)
-        point_estimates = self._run_single_estimation(df)
+        point_estimates, control_func = self._run_single_estimation(df)
         
         # 2. Bootstrapping (wiederholung des ganzen Ablaufs x mal)
         boot_estimates = []
@@ -180,7 +209,7 @@ class ICAEstimator:
                     break
             
             # Schätzung auf dem gültigen Bootstrap-Sample 
-            boot_beta = self._run_single_estimation(df_boot)
+            boot_beta, _ = self._run_single_estimation(df_boot)
             boot_estimates.append(boot_beta)
             
         # Standardfehler aus den Bootstrap-Ergebnissen
@@ -197,6 +226,20 @@ class ICAEstimator:
         result_df['t value'] = result_df['Estimate'] / result_df['Std. Error']
         # 2-seitiger p-Wert
         result_df['Pr(>|t|)'] = 2 * (1 - stats.norm.cdf(np.abs(result_df['t value'])))
+
+        # 4. Identifikations-Checks (analog zum R-Code)
+        # KS-Test auf Standardnormalverteilung (Skalierung zur Sicherheit)
+        cf_std = (control_func - np.mean(control_func)) / np.std(control_func)
+        _, ks_p_value = stats.kstest(cf_std, 'norm')
+
+        if ks_p_value < 0.1:
+            warnings.warn(
+                f"Joint component may not be normally distributed: Kolmogorov-Smirnov p = {ks_p_value:.4f}"
+            )
+
+        # Prüfung auf Duplikate (Ties)
+        if len(np.unique(control_func)) < len(control_func):
+            warnings.warn("Endogenous regressors contain ties (repeated values)")
         
         return result_df
 
