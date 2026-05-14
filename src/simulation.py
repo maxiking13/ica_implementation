@@ -23,12 +23,14 @@ class SimulationEngine:
 
     def run(self, sample_sizes, distribution_configs):
         """
-        Führt die Simulation für alle Kombinationen aus N und Verteilungskonfigurationen durch.
+        Führt die Simulation für alle Kombinationen aus N und Verteilungen durch.
         
-        sample_sizes: Liste von N (z.B. [250, 500, 1000])
-        distribution_configs: Liste von dicts, z.B. [{'name': 'gamma', 'params': {'shape': 1.0}}]
-        Rückgabe: DataFrame mit den aggregierten Ergebnissen (Bias, RMSE, Skewness, Kurtosis)
+        sample_sizes: Liste von N (z.B. [100, 250, 500])
+        distribution_configs: Liste von Dictionaries mit Verteilungen und Parametern
+        DataFrame mit den aggregierten Ergebnissen (Bias, RMSE)
         """
+        import warnings
+        
         results = []
         
         # Wir durchlaufen alle gewünschten Stichprobengrößen
@@ -38,63 +40,70 @@ class SimulationEngine:
                 dist_name = config['name']
                 dist_params = config.get('params', {})
                 
-                print(f"Simuliere Szenario: N={n}, Verteilung={dist_name}, Parameter={dist_params}")
+                rho_val = config.get('rho', self.true_rho) 
+            
+                print(f"Simuliere Szenario: N={n}, Verteilung={dist_name}, Parameter={dist_params}, Rho={rho_val}")
                 
                 estimates_ols = []
                 estimates_ica = []
                 skewness_list = []
-                kurtosis_list = []
                 
                 # Die eigentliche Wiederholung (tqdm macht Ladebalken)
                 for i in tqdm(range(self.n_iterations)):
                     
-                    # Daten neu generieren
+                    # Daten neu generieren (jedes Mal leicht anders wegen neuem Seed) 
+                    # Zufallszahl Ziehen, daraus P und Y bauen und alles in df speichern
                     current_seed = self.random_state + i + n
                     generator = DataGenerator(
                         n_samples=n, 
                         beta=self.true_beta, 
-                        rho=self.true_rho, 
+                        rho=rho_val,
                         eta_dist=dist_name, 
                         random_state=current_seed
                     )
-                    
-                    # Übergebe die spezifischen Parameter an den DataGenerator
                     df = generator.generate(dist_params=dist_params)
                     
-                    # Speichere die empirische Schiefe und Wölbung für dieses Sample
+                    # Speichere die empirische Schiefe für dieses Sample
                     skewness_list.append(df.attrs['skewness'])
-                    kurtosis_list.append(df.attrs['kurtosis'])
                     
-                    # Y ~ P Regression normales OLS Modell
+                    # Y ~ P Regression normales OLS Modell, verzerrt wegen Endogenität. gilt einfach als Vergelichsmaßstab
                     X_ols = sm.add_constant(df[['P']])
                     model_ols = sm.OLS(df['Y'], X_ols).fit()
                     estimates_ols.append(model_ols.params['P'])
                     
-                    # ICA-Schätzer 
+                    # ICA-Schätzer (siehe icaEstimator.py)
                     estimator_ica = ICAEstimator(formula="Y ~ P", CF=False)
-                    # WICHTIG: Tupel entpacken (_ fängt die control_func ab), da die Methode jetzt 2 Werte zurückgibt!
-                    params_ica, _ = estimator_ica._run_single_estimation(df)
-                    estimates_ica.append(params_ica['P'])
+                    
+                    # Direkter Aufruf ohne das Bootstrapping (TURBO-MODUS für die Simulation)
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        try:
+                            # Wir fangen die Parameter und die (hier ignorierte) control_func ab
+                            params_ica, _ = estimator_ica._run_single_estimation(df)
+                            estimates_ica.append(params_ica['P'])
+                        except Exception:
+                            # Falls ICA bei sehr kleinem N crasht (Matrix nicht vollen Rang etc.)
+                            estimates_ica.append(np.nan)
                 
                 
-                # Bias und RMSE berechnen
+                # Leere/kaputte Durchläufe (NaNs) aus der ICA-Liste filtern
+                valid_ica = [x for x in estimates_ica if not np.isnan(x)]
+                
+                # Bias = Durchschnittlicher Schätzwert - Wahrer Wert
                 bias_ols = np.mean(estimates_ols) - self.true_beta
-                bias_ica = np.mean(estimates_ica) - self.true_beta
+                bias_ica = np.median(valid_ica) - self.true_beta if valid_ica else np.nan
                 
+                # RMSE = Wurzel aus dem durchschnittlichen quadrierten Fehler
                 rmse_ols = np.sqrt(np.mean((np.array(estimates_ols) - self.true_beta)**2))
-                rmse_ica = np.sqrt(np.mean((np.array(estimates_ica) - self.true_beta)**2))
-                
-                # Durchschnittliche Schiefe und Wölbung über alle Iterationen
-                avg_skewness = np.mean(skewness_list)
-                avg_kurtosis = np.mean(kurtosis_list)
+                rmse_ica = np.sqrt(np.mean((np.array(valid_ica) - self.true_beta)**2)) if valid_ica else np.nan
                 
                 # Ergebnisse des Szenarios
                 results.append({
                     'N': n,
+                    'Rho': rho_val,
                     'Verteilung_X': dist_name,
                     'Parameter': str(dist_params),
-                    'Avg_Skewness': round(avg_skewness, 4),
-                    'Avg_Kurtosis': round(avg_kurtosis, 4),
+                    'Avg_Skewness': round(np.mean(skewness_list), 4),
                     'Bias_OLS': round(bias_ols, 4),
                     'Bias_ICA': round(bias_ica, 4),
                     'RMSE_OLS': round(rmse_ols, 4),

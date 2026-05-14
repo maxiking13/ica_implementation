@@ -45,36 +45,73 @@ def main():
     
     
 
-    N_LIST = [100, 200, 400, 800, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000]
+  # === FOKUS-SIMULATION: EXAKTE REPLIKATION VON BECKER FIG 6 ===
+    
+    # 1. Die X-Achse (Stichprobengrößen)
+    N_LIST = [100, 200, 400, 1000, 4000, 10000]
 
-    DIST_CONFIGS = [
-        {'name': 'gamma', 'params': {'shape': 1.0, 'scale': 1.0}},      # Extrem schief
-        {'name': 'gamma', 'params': {'shape': 5.0, 'scale': 1.0}},      # Moderat schief
-        {'name': 'exponential', 'params': {'scale': 1.0}},             # Stark schief
-        {'name': 'beta', 'params': {'a': 0.5, 'b': 0.5}},             # U-förmig
-        {'name': 'f', 'params': {'dfnum': 5, 'dfden': 2}},             # Langer rechter Rand
-        {'name': 'chisquare', 'params': {'df': 1}},                    # Extrem spitz/schief
-        {'name': 'laplace', 'params': {'scale': 1.0}},                 # Symmetrisch, hohe Kurtosis
-        {'name': 'weibull', 'params': {'a': 0.5}},                     # Stark abfallend
+    # 2. Die Spalten (Endogenitäts-Level rho)
+    RHO_LIST = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
+
+    # 3. Die Basis-Verteilungen (Die Zeilen und Farben im Paper)
+    BASE_DIST_CONFIGS = [
+        # BETA-Verteilung (p, q)
+        {'name': 'beta', 'params': {'a': 0.5, 'b': 0.5}},
+        {'name': 'beta', 'params': {'a': 1.0, 'b': 1.0}},
+        {'name': 'beta', 'params': {'a': 2.0, 'b': 2.0}},
+        {'name': 'beta', 'params': {'a': 4.0, 'b': 4.0}},
+
+        # CHI-QUADRAT-Verteilung (df)
+        {'name': 'chisquare', 'params': {'df': 2}}, 
+        {'name': 'chisquare', 'params': {'df': 8}}, 
+        {'name': 'chisquare', 'params': {'df': 14}},
+        {'name': 'chisquare', 'params': {'df': 20}},
+
+        # GAMMA-Verteilung (shape, scale)
+        {'name': 'gamma', 'params': {'shape': 1.0, 'scale': 0.5}},
+        {'name': 'gamma', 'params': {'shape': 1.0, 'scale': 2.0}},
+        {'name': 'gamma', 'params': {'shape': 2.0, 'scale': 4.0}},
+        {'name': 'gamma', 'params': {'shape': 4.0, 'scale': 2.0}},
+
+        # LOGNORMAL-Verteilung (mean, sigma)
+        {'name': 'lognormal', 'params': {'mean': 0.0, 'sigma': 1.0}},
+        {'name': 'lognormal', 'params': {'mean': 0.0, 'sigma': 0.75}},
+        {'name': 'lognormal', 'params': {'mean': 0.0, 'sigma': 0.50}},
+        {'name': 'lognormal', 'params': {'mean': 0.0, 'sigma': 0.25}},
+
+        # STUDENT-T-Verteilung (df)
+        {'name': 't', 'params': {'df': 3}},
+        {'name': 't', 'params': {'df': 4}},
+        {'name': 't', 'params': {'df': 5}},
+        {'name': 't', 'params': {'df': 6}},
     ]
 
-    # 2. SimulationEngine mit mehr Iterationen für stabilere Ergebnisse
-    engine = SimulationEngine(n_iterations=100, true_beta=WAHRER_EFFEKT, random_state=99)
+    # Wir bauen jetzt dynamisch alle Kombinationen aus Verteilung und Rho zusammen
+    DIST_CONFIGS = []
+    for rho in RHO_LIST:
+        for config in BASE_DIST_CONFIGS:
+            new_config = config.copy()
+            new_config['rho'] = rho  # Wir fügen das spezifische rho in das config-Dictionary ein
+            DIST_CONFIGS.append(new_config)
+
+    engine = SimulationEngine(
+        n_iterations=500,
+        true_beta=WAHRER_EFFEKT, 
+        random_state=99
+    )
     
-    print(f"Starte Groß-Simulation über {len(N_LIST)} Stichprobengrößen und {len(DIST_CONFIGS)} Verteilungen...\n")
+    total_scenarios = len(N_LIST) * len(DIST_CONFIGS)
+    print(f"\nStarte GROSSE Replikation von Becker Fig. 6...")
+    print(f"Berechne {total_scenarios} Szenarien. Das kann ein paar Minuten dauern...\n")
     
     ergebnis_tabelle = engine.run(
         sample_sizes=N_LIST, 
         distribution_configs=DIST_CONFIGS
     )
     
-    # 3. Ergebnisse anzeigen und als CSV für die Auswertung speichern
-    print("\n=== FINALE SIMULATIONSERGEBNISSE ===")
-    print(ergebnis_tabelle.head(20).to_string(index=False)) # Zeige die ersten 20 Zeilen
-    
-    # Speichere die Daten für deine Graphen/Plots
-    ergebnis_tabelle.to_csv("simulations_ergebnisse_gross.csv", index=False)
-    print("\nErgebnisse wurden in 'simulations_ergebnisse_gross.csv' gespeichert.")
+    # Speichere die riesige Tabelle
+    ergebnis_tabelle.to_csv("simulations_becker_fig6_full.csv", index=False)
+    print("\nErgebnisse wurden in 'simulations_becker_fig6_full.csv' gespeichert.")
     
 
 if __name__ == "__main__":

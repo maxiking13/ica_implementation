@@ -77,6 +77,11 @@ class DataGenerator:
             low = dist_params.get("low", -1.0)
             high = dist_params.get("high", 1.0)
             return self.rng.uniform(low=low, high=high, size=self.n_samples)
+        
+        elif self.eta_dist == "normal":
+            mean = dist_params.get("mean", 0.0)
+            std = dist_params.get("std", 1.0)
+            return self.rng.normal(loc=mean, scale=std, size=self.n_samples)
 
         elif self.eta_dist == "lognormal":
             mean = dist_params.get("mean", 0.0)
